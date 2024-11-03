@@ -1,9 +1,7 @@
 import streamlit as st
 import pandas as pd
 import requests
-import io
 from io import StringIO
-import pytesseract
 from PIL import Image
 import fitz  # PyMuPDF
 import re
@@ -12,6 +10,9 @@ import shutil
 
 # URL del Google Sheet publicado en formato CSV
 google_sheet_url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTaBKdM2YGJi64ZeVkNMyXDxdXNIkG08ArePdIefR4HwEIoLAks1ptTR3Xncs_27gwc9C-xI-AKvsBE/pub?gid=1769604217&single=true&output=csv"
+
+# Clave de API de OCR.space
+ocr_space_api_key = "K84097165688957"
 
 # Función para cargar los datos del Google Sheet en un DataFrame
 def cargar_datos_google_sheet(url):
@@ -24,7 +25,20 @@ def cargar_datos_google_sheet(url):
 # Cargar el archivo CSV desde Google Sheets
 df = cargar_datos_google_sheet(google_sheet_url)
 
-# Función para extraer el número de remito usando PyMuPDF para PDFs
+# Función para realizar OCR usando la API de OCR.space
+def realizar_ocr_con_api(image_path):
+    url = 'https://api.ocr.space/parse/image'
+    with open(image_path, 'rb') as f:
+        files = {'file': f}
+        data = {'apikey': ocr_space_api_key, 'language': 'eng'}
+        response = requests.post(url, files=files, data=data)
+        result = response.json()
+        if result["IsErroredOnProcessing"]:
+            st.error("Error en el procesamiento de OCR")
+            return None
+        return result["ParsedResults"][0]["ParsedText"]
+
+# Función para extraer el número de remito usando OCR.space para PDFs e imágenes
 def extraer_numero_remito(file_path):
     numero_remito = None
     file_extension = os.path.splitext(file_path)[1].lower()
@@ -36,23 +50,27 @@ def extraer_numero_remito(file_path):
         for pagina_num in range(documento_pdf.page_count):
             pagina = documento_pdf.load_page(pagina_num)
             pix = pagina.get_pixmap()  # Renderiza la página como imagen
-            imagen = Image.open(io.BytesIO(pix.tobytes("png")))  # Convierte a imagen PIL
+            imagen_path = f"temp_page_{pagina_num}.png"
+            pix.save(imagen_path)  # Guarda temporalmente la imagen
             
-            # Extrae texto de la imagen
-            texto = pytesseract.image_to_string(imagen)
+            # Realiza OCR en la imagen usando OCR.space
+            texto = realizar_ocr_con_api(imagen_path)
+            os.remove(imagen_path)  # Borra la imagen temporal
+            
+            if texto:
+                remito_match = re.search(patron_remito, texto, re.IGNORECASE)
+                if remito_match:
+                    parte1, parte2 = remito_match.groups()
+                    numero_remito = f"{parte1}-{parte2}"
+                    break
+    else:
+        # Procesa archivos de imagen directamente
+        texto = realizar_ocr_con_api(file_path)
+        if texto:
             remito_match = re.search(patron_remito, texto, re.IGNORECASE)
             if remito_match:
                 parte1, parte2 = remito_match.groups()
                 numero_remito = f"{parte1}-{parte2}"
-                break
-    else:
-        # Procesa archivos de imagen directamente
-        imagen = Image.open(file_path)
-        texto = pytesseract.image_to_string(imagen)
-        remito_match = re.search(patron_remito, texto, re.IGNORECASE)
-        if remito_match:
-            parte1, parte2 = remito_match.groups()
-            numero_remito = f"{parte1}-{parte2}"
 
     return numero_remito
 
