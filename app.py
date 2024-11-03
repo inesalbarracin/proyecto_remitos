@@ -2,9 +2,9 @@ import streamlit as st
 import pandas as pd
 import requests
 from io import StringIO
-from pdf2image import convert_from_path
 import pytesseract
 from PIL import Image
+import fitz  # PyMuPDF
 import re
 import os
 import shutil
@@ -23,22 +23,29 @@ def cargar_datos_google_sheet(url):
 # Cargar el archivo CSV desde Google Sheets
 df = cargar_datos_google_sheet(google_sheet_url)
 
-# Función para extraer el número de remito
+# Función para extraer el número de remito usando PyMuPDF para PDFs
 def extraer_numero_remito(file_path):
     numero_remito = None
     file_extension = os.path.splitext(file_path)[1].lower()
     patron_remito = r'[^\d]*([o0]*47|52)-[o0]*(\d{4,5})'
 
+    # Si el archivo es PDF, usa PyMuPDF para convertir las páginas en imágenes
     if file_extension == ".pdf":
-        paginas = convert_from_path(file_path, poppler_path='/app/poppler/bin')  # Ajusta el poppler_path si es necesario
-        for pagina in paginas:
-            texto = pytesseract.image_to_string(pagina)
+        documento_pdf = fitz.open(file_path)
+        for pagina_num in range(documento_pdf.page_count):
+            pagina = documento_pdf.load_page(pagina_num)
+            pix = pagina.get_pixmap()  # Renderiza la página como imagen
+            imagen = Image.open(io.BytesIO(pix.tobytes("png")))  # Convierte a imagen PIL
+            
+            # Extrae texto de la imagen
+            texto = pytesseract.image_to_string(imagen)
             remito_match = re.search(patron_remito, texto, re.IGNORECASE)
             if remito_match:
                 parte1, parte2 = remito_match.groups()
                 numero_remito = f"{parte1}-{parte2}"
                 break
     else:
+        # Procesa archivos de imagen directamente
         imagen = Image.open(file_path)
         texto = pytesseract.image_to_string(imagen)
         remito_match = re.search(patron_remito, texto, re.IGNORECASE)
