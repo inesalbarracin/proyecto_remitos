@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import requests
+import io
 from io import StringIO
 import pytesseract
 from PIL import Image
